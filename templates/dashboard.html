@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f3f4f6; margin: 0; padding: 30px; }
+        .card { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 15px; margin-bottom: 25px; }
+        h1 { color: #1e3a8a; margin: 0; }
+        .role-btn { text-decoration: none; background: #4b5563; color: white; padding: 8px 14px; border-radius: 6px; font-size: 14px; margin-left: 8px; font-weight: 500; }
+        .role-btn:hover { background: #374151; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 30px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f3f4f6; color: #475569; font-weight: 600; }
+        .btn-request { background-color: #2563eb; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .btn-request:hover { background-color: #1d4ed8; }
+        .badge-disabled { background-color: #cbd5e1; color: #64748b; padding: 6px 12px; border-radius: 4px; font-size: 13px; font-style: italic; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .status-active { background-color: #fef3c7; color: #d97706; }
+        .status-returned { background-color: #d1fae5; color: #065f46; }
+        .btn-return { background-color: #10b981; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-left: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="header">
+        <div>
+            <h1>📚 Library Dashboard</h1>
+            <p style="margin: 5px 0 0 0;"><strong>Logged in as:</strong> {{ user.username }} ({{ user.role }})</p>
+        </div>
+        <div>
+            <a href="/login-as/student" class="role-btn" style="background-color: #2563eb;">Student View</a>
+            <a href="/login-as/librarian" class="role-btn" style="background-color: #10b981;">Librarian View</a>
+        </div>
+    </div>
+
+    <h3>Available Books</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Available Copies</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for book in books %}
+            <tr>
+                <td><strong>{{ book.title }}</strong></td>
+                <td>{{ book.author }}</td>
+                <td>{{ book.available_copies }}</td>
+                <td>
+                    {% if user.role == 'Student' %}
+                        {% if book.available_copies > 0 %}
+                            <form action="/borrow/{{ book.id }}" method="POST" style="margin:0;">
+                                <button type="submit" class="btn-request">Request Loan</button>
+                            </form>
+                        {% else %}
+                            <span class="badge-disabled">Out of Stock</span>
+                        {% endif %}
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 13px;">View Only</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>Your Active Loans & History</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Book Title</th>
+                <th>Borrower</th>
+                <th>Due Date</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in history %}
+            <tr>
+                <td>{{ record.title }}</td>
+                <td>{{ record.username }}</td>
+                <td>{{ record.due_date }}</td>
+                <td>
+                    {% if record.return_date %}
+                        <span class="status-badge status-returned">Returned</span>
+                    {% else %}
+                        <span class="status-badge status-active">Active</span>
+                        {% if user.role == 'Librarian' or user.username == record.username %}
+                            <form action="/return/{{ record.id }}" method="POST" style="display:inline; margin:0;">
+                                <button type="submit" class="btn-return">Mark Returned</button>
+                            </form>
+                        {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align: center; color: #64748b; padding: 15px;">No active loans found. Click "Request Loan" above to test!</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>

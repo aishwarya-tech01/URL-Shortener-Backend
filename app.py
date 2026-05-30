@@ -1,146 +1,158 @@
-from flask import Flask, render_template_string, request, redirect, session, url_for
+import os
 import sqlite3
 from datetime import datetime, timedelta
+from flask import Flask, render_template, request, redirect, url_for, session
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_secure_key_aishwarya'
+app.secret_key = 'super_secret_library_key_secure'
+DATABASE = 'library.db'
 
-def get_db():
-    conn = sqlite3.connect('library.db')
+def get_db_connection():
+    conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 def init_db():
-    with get_db() as conn:
-        with open('schema.sql', 'r') as f:
-            conn.executescript(f.read())
-        
-        # Insert default accounts for testing our roles if they don't exist
-        try:
-            conn.execute("INSERT INTO users (username, password, role) VALUES ('admin', 'admin123', 'Super Admin')")
-            conn.execute("INSERT INTO users (username, password, role) VALUES ('librarian', 'lib123', 'Librarian')")
-            conn.execute("INSERT INTO users (username, password, role) VALUES ('student', 'student123', 'Student')")
-            conn.execute("INSERT INTO books (title, author, total_copies, available_copies) VALUES ('Python Basics', 'Aishwarya', 5, 5)")
-            conn.commit()
-        except sqlite3.IntegrityError:
-            pass
+    """Initializes the database structure and injects foundational testing data."""
+    conn = get_db_connection()
+    
+    # 1. Users Table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('Super Admin', 'Librarian', 'Student')),
+            fine_balance REAL DEFAULT 0.0
+        )
+    ''')
+    
+    # 2. Books Inventory Table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS books (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            author TEXT NOT NULL,
+            total_copies INTEGER NOT NULL,
+            available_copies INTEGER NOT NULL
+        )
+    ''')
+    
+    # 3. Borrow Records Table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS borrow_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            book_id INTEGER NOT NULL,
+            borrow_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            due_date TIMESTAMP NOT NULL,
+            return_date TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(book_id) REFERENCES books(id)
+        )
+    ''')
+    
+    # Inject Mock Data for testing
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO users (username, password, role, fine_balance) VALUES ('student1', 'pass123', 'Student', 0.0)")
+    cursor.execute("INSERT OR IGNORE INTO users (username, password, role, fine_balance) VALUES ('librarian1', 'pass456', 'Librarian', 0.0)")
+    
+    cursor.execute("SELECT COUNT(*) FROM books")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO books (title, author, total_copies, available_copies) VALUES ('Python Basics for Beginners', 'Saurabh Kumar', 5, 5)")
+        cursor.execute("INSERT INTO books (title, author, total_copies, available_copies) VALUES ('Database Management Systems', 'Aishwarya R.', 3, 3)")
+        cursor.execute("INSERT INTO books (title, author, total_copies, available_copies) VALUES ('Web Systems Engine Design', 'Flask Guru', 2, 2)")
+    
+    conn.commit()
+    conn.close()
 
-# UI Layer served as an elegant, single-file card matrix
-DASHBOARD_UI = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Library Workspace</title>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f4f6f9; margin: 0; padding: 40px; color: #333; }
-        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); max-width: 800px; margin: 0 auto 20px; }
-        h1, h2 { color: #2c3e50; margin-top: 0; }
-        .badge { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; background: #3498db; color: white; }
-        .table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        .table th { background: #f8f9fa; }
-        .btn { background: #2c3e50; color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .logout { background: #e74c3c; float: right; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <a href="/logout" class="btn logout">Logout</a>
-        <h1>📚 Library Operations Center</h1>
-        <p>Active Session Identity: <strong>{{ user['username'] }}</strong> <span class="badge">{{ user['role'] }}</span></p>
-        
-        {% if user['role'] == 'Student' %}
-            <h3>Your Account Status</h3>
-            <p>Outstanding Fine Balance: <strong style="color: #e74c3c;">${{ user['fine_balance'] }}</strong></p>
-        {% endif %}
-    </div>
-
-    <div class="card">
-        <h2>📖 Active Book Catalog</h2>
-        <table class="table">
-            <tr><th>ID</th><th>Title</th><th>Author</th><th>Available Stock</th><th>Actions</th></tr>
-            {% for book in books %}
-            <tr>
-                <td>{{ book['id'] }}</td>
-                <td>{{ book['title'] }}</td>
-                <td>{{ book['author'] }}</td>
-                <td>{{ book['available_copies'] }} / {{ book['total_copies'] }}</td>
-                <td>
-                    {% if user['role'] == 'Student' %}
-                        {% if user['fine_balance'] > 0 %}
-                            <span style="color: red; font-size: 12px;">Borrowing Blocked (Outstanding Fine)</span>
-                        {% else %}
-                            <a href="/borrow/{{ book['id'] }}" class="btn">Request Loan</a>
-                        {% endif %}
-                    {% else %}
-                        <span style="color: #7f8c8d; font-size: 13px;">Management Control Only</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </table>
-    </div>
-</body>
-</html>
-"""
+# ---------------- APPLICATION WORKFLOW CONTROLLERS ----------------
 
 @app.route('/')
-def dashboard():
-    if 'user_id' not in session:
-        return "<h3>System Locked. Please simulate authentication by accessing <a href='/login-as/student'>Student Session</a>, <a href='/login-as/librarian'>Librarian Session</a>, or <a href='/login-as/admin'>Admin Session</a>.</h3>"
-    
-    conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
-    books = conn.execute("SELECT * FROM books").fetchall()
-    conn.close()
-    
-    return render_template_string(DASHBOARD_UI, user=user, books=books)
+def index():
+    """Fallback entry point redirecting to default student view."""
+    return redirect(url_for('login_simulation', role_type='student'))
 
 @app.route('/login-as/<role_type>')
-def auto_login(role_type):
-    conn = get_db()
-    if role_type == 'admin':
-        user = conn.execute("SELECT * FROM users WHERE role = 'Super Admin'").fetchone()
-    elif role_type == 'librarian':
-        user = conn.execute("SELECT * FROM users WHERE role = 'Librarian'").fetchone()
+def login_simulation(role_type):
+    """Simulates instant profile switching using session injection."""
+    role = role_type.lower()
+    conn = get_db_connection()
+    
+    if role == 'student':
+        user_row = conn.execute("SELECT * FROM users WHERE role='Student' LIMIT 1").fetchone()
+        session['user'] = {'id': user_row['id'], 'username': user_row['username'], 'role': 'Student', 'fine': user_row['fine_balance']}
+    elif role == 'librarian':
+        user_row = conn.execute("SELECT * FROM users WHERE role='Librarian' LIMIT 1").fetchone()
+        session['user'] = {'id': user_row['id'], 'username': user_row['username'], 'role': 'Librarian', 'fine': 0.0}
     else:
-        user = conn.execute("SELECT * FROM users WHERE role = 'Student'").fetchone()
-    
-    session['user_id'] = user['id']
-    conn.close()
-    return redirect(url_for('dashboard'))
-
-@app.route('/borrow/<int:book_id>')
-def borrow_book(book_id):
-    if 'user_id' not in session:
-        return redirect(url_for('dashboard'))
-        
-    conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
-    
-    # Advanced Business Barrier: Check if student has fines before inserting row
-    if user['role'] == 'Student' and user['fine_balance'] > 0:
         conn.close()
-        return "Transaction Aborted: Borrowing privileges revoked due to fine models.", 403
+        return "Access Violation: Target security group unauthorized.", 403
+
+    # Pull dashboard statistics
+    books = conn.execute('SELECT * FROM books').fetchall()
+    
+    # Fetch tracking history
+    history_query = '''
+        SELECT br.id, b.title, u.username, br.borrow_date, br.due_date, br.return_date 
+        FROM borrow_records br
+        JOIN books b ON br.book_id = b.id
+        JOIN users u ON br.user_id = u.id
+    '''
+    if session['user']['role'] == 'Student':
+        history = conn.execute(history_query + " WHERE br.user_id = ?", (session['user']['id'],)).fetchall()
+    else:
+        history = conn.execute(history_query).fetchall()
         
-    book = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+    conn.close()
+    return render_template('dashboard.html', books=books, history=history, user=session['user'])
+
+@app.route('/borrow/<int:book_id>', methods=['POST'])
+def borrow_book(book_id):
+    """Handles the book borrowing pipeline logic."""
+    if 'user' not in session or session['user']['role'] != 'Student':
+        return "Security block: Librarians are unauthorized to borrow inventory.", 403
+
+    conn = get_db_connection()
+    book = conn.execute('SELECT * FROM books WHERE id = ?', (book_id,)).fetchone()
+
     if book and book['available_copies'] > 0:
-        # Decrement stock tracking layout
-        conn.execute("UPDATE books SET available_copies = available_copies - 1 WHERE id = ?", (book_id,))
-        # Set a clear 14-day due date
-        due = datetime.now() + timedelta(days=14)
-        conn.execute("INSERT INTO borrow_records (user_id, book_id, due_date) VALUES (?, ?, ?)", 
-                     (user['id'], book_id, due.strftime('%Y-%m-%d %H:%M:%S')))
+        # Deduct an available copy
+        conn.execute('UPDATE books SET available_copies = available_copies - 1 WHERE id = ?', (book_id,))
+        
+        # Calculate dates
+        borrow_dt = datetime.now()
+        due_dt = borrow_dt + timedelta(days=14)
+        
+        conn.execute('''
+            INSERT INTO borrow_records (user_id, book_id, borrow_date, due_date)
+            VALUES (?, ?, ?, ?)
+        ''', (session['user']['id'], book_id, borrow_dt.strftime('%Y-%m-%d %H:%M:%S'), due_dt.strftime('%Y-%m-%d %H:%M:%S')))
+        
+        conn.commit()
+    
+    conn.close()
+    return redirect(url_for('login_simulation', role_type='student'))
+
+@app.route('/return/<int:record_id>', methods=['POST'])
+def return_book(record_id):
+    """Processes inventory returns."""
+    conn = get_db_connection()
+    record = conn.execute('SELECT * FROM borrow_records WHERE id = ?', (record_id,)).fetchone()
+
+    if record and record['return_date'] is None:
+        # Return book copy to inventory
+        conn.execute('UPDATE books SET available_copies = available_copies + 1 WHERE id = ?', (record['book_id'],))
+        
+        # Timestamp the return
+        return_dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute('UPDATE borrow_records SET return_date = ? WHERE id = ?', (return_dt, record_id))
+        
         conn.commit()
         
     conn.close()
-    return redirect(url_for('dashboard'))
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('dashboard'))
+    current_role = session.get('user', {}).get('role', 'Student').lower()
+    return redirect(url_for('login_simulation', role_type=current_role))
 
 if __name__ == '__main__':
     init_db()
