@@ -1,5 +1,3 @@
-
-```sql
 DROP TABLE IF EXISTS borrow_records;
 DROP TABLE IF EXISTS books;
 DROP TABLE IF EXISTS users;
